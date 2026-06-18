@@ -1,38 +1,62 @@
-version: 1
+version: 2
 fallback:
   intent: unknown
   gloss: UNKNOWN
-  text_zh: "未能可靠识别，请重新录制。"
+  text_zh: "无法识别，请让对方重试。"
 intents:
-  registration:
-    gloss: REGISTER
-    text_zh: "我想挂号。"
+  CONFIRMATION:
+    gloss: CONFIRMATION
+    text_zh: "对方想挂号。"
     safety_level: normal
-  appointment:
-    gloss: APPOINTMENT
-    text_zh: "我想预约。"
+  TIME_QUERY:
+    gloss: TIME_QUERY
+    text_zh: "对方在询问时间。"
     safety_level: normal
-  payment:
-    gloss: PAY
-    text_zh: "我想缴费。"
+  PURCHASE:
+    gloss: PURCHASE
+    text_zh: "对方想缴费。"
     safety_level: normal
-  pharmacy:
-    gloss: MEDICINE
-    text_zh: "请问药房在哪里？"
+  LOCATION_QUERY:
+    gloss: LOCATION_QUERY
+    text_zh: "对方在询问位置。"
     safety_level: normal
-  directions:
-    gloss: WHERE
-    text_zh: "请问应该去哪里？"
+  QUESTION:
+    gloss: QUESTION
+    text_zh: "对方在询问。"
     safety_level: normal
-  help:
-    gloss: HELP
-    text_zh: "我需要帮助。"
+  HELP_REQUEST:
+    gloss: HELP_REQUEST
+    text_zh: "对方需要帮助。"
     safety_level: elevated
-  emergency:
+  HEALTH:
+    gloss: HEALTH
+    text_zh: "对方身体不舒服。"
+    safety_level: elevated
+  EMERGENCY:
     gloss: EMERGENCY
-    text_zh: "这是紧急情况，请立即联系工作人员。"
+    text_zh: "对方有紧急情况！"
     safety_level: critical
-  pain:
-    gloss: PAIN
-    text_zh: "我感到疼痛，请安排工作人员确认具体情况。"
-    safety_level: elevated
+  ACTION_REQUEST:
+    gloss: ACTION_REQUEST
+    text_zh: "对方需要协助。"
+    safety_level: normal
+  LIKE_PREFERENCE:
+    gloss: LIKE_PREFERENCE
+    text_zh: "对方表达了需求。"
+    safety_level: normal
+  NEGATION:
+    gloss: NEGATION
+    text_zh: "对方表示不同意。"
+    safety_level: normal
+  EMOTION:
+    gloss: EMOTION
+    text_zh: "对方情绪有波动。"
+    safety_level: normal
+  GREETING:
+    gloss: GREETING
+    text_zh: "对方在打招呼。"
+    safety_level: normal
+  OTHER:
+    gloss: OTHER
+    text_zh: "暂未识别到明确的意图。"
+    safety_level: unknown

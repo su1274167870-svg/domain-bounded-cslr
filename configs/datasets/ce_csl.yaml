@@ -1,0 +1,9 @@
+name: ce_csl
+status: provisional
+task: continuous_slr
+adapter: csv_manifest
+manifest: data/manifests/ce_csl.csv
+video_root: data/raw/CE-CSL/video
+license:
+  name: CC BY-NC 4.0
+  url: ""

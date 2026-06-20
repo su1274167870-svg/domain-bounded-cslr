@@ -52,3 +52,5 @@ docs/ethics/consent-forms/
 build/
 dist/
 *.egg-info/
+data/alignment/
+data/isolated/

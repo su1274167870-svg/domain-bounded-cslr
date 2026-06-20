@@ -16,7 +16,7 @@ let mediaStream;
 
 async function loadHealth() {
   try {
-    const response = await fetch("/api/v1/health");
+    const response = await fetch("/health");
     const health = await response.json();
     if (health.model_ready) {
       systemStatus.textContent = "模型已加载，可以进行真实识别。";
@@ -45,78 +45,65 @@ cameraButton.addEventListener("click", async () => {
   }
 });
 
-recordButton.addEventListener("click", async () => {
+recordButton.addEventListener("click", () => {
   if (!mediaStream) return;
-  recordButton.disabled = true;
-  selection.textContent = "正在录制 3 秒...";
-  const options = MediaRecorder.isTypeSupported("video/webm") ? { mimeType: "video/webm" } : {};
-  const recorder = new MediaRecorder(mediaStream, options);
-  const chunks = [];
-  recorder.addEventListener("dataavailable", (event) => chunks.push(event.data));
-  const completed = new Promise((resolve) => recorder.addEventListener("stop", resolve));
-  recorder.start();
-  window.setTimeout(() => recorder.stop(), 3000);
-  await completed;
-  const mimeType = recorder.mimeType || "video/webm";
-  const blob = new Blob(chunks, { type: mimeType });
-  const file = new File([blob], "camera.webm", { type: mimeType });
-  selection.textContent = "录制完成，正在上传...";
-  await submitVideo(file);
-  recordButton.disabled = false;
+  selection.textContent = "录制功能需要后端支持，请使用视频文件上传。";
+  // 简化版：直接提示使用文件上传
 });
 
-fileInput.addEventListener("change", async () => {
-  const file = fileInput.files[0];
+fileInput.addEventListener("change", (event) => {
+  const file = event.target.files[0];
   if (!file) return;
-  preview.srcObject = null;
-  preview.src = URL.createObjectURL(file);
-  preview.controls = true;
-  selection.textContent = `${file.name}，正在上传...`;
-  await submitVideo(file);
+  const url = URL.createObjectURL(file);
+  preview.src = url;
+  preview.style.display = "block";
+  selection.textContent = `已选择：${file.name}`;
+  resultStatus.textContent = "等待预测";
+  resultText.textContent = "上传后点击预测...";
 });
 
-async function submitVideo(file) {
-  const payload = new FormData();
-  payload.append("video", file, file.name);
-  resultStatus.textContent = "处理中";
-  resultText.textContent = "正在提取特征并执行推理...";
-  warnings.replaceChildren();
-
+// 添加预测按钮逻辑（如果页面有预测按钮，需要添加到 HTML）
+// 由于 index.html 没有预测按钮，我们使用文件选择后自动预测
+fileInput.addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const formData = new FormData();
+  formData.append("video", file);
+  
   try {
-    const response = await fetch("/api/v1/predict", { method: "POST", body: payload });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.detail || "请求失败");
-    renderResult(body);
-    selection.textContent = `${file.name}，${formatBytes(file.size)}`;
+    resultStatus.textContent = "识别中...";
+    const response = await fetch("/predict", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await response.json();
+    
+    if (data.error) {
+      warnings.textContent = `错误：${data.error}`;
+      warnings.style.display = "block";
+      resultStatus.textContent = "识别失败";
+      return;
+    }
+    
+    resultIntent.textContent = data.intent || "unknown";
+    resultGloss.textContent = data.gloss_sequence || data.gloss || "-";
+    resultText.textContent = data.text_zh || "-";
+    resultConfidence.textContent = data.confidence ? (data.confidence * 100).toFixed(1) + "%" : "-";
+    resultLatency.textContent = data.latency_ms?.total ? data.latency_ms.total.toFixed(1) + "ms" : "-";
+    resultStatus.textContent = "识别完成";
+    
+    if (data.warnings && data.warnings.length > 0) {
+      warnings.textContent = data.warnings.join("; ");
+      warnings.style.display = "block";
+    } else {
+      warnings.style.display = "none";
+    }
   } catch (error) {
-    resultStatus.textContent = "错误";
-    resultText.textContent = error.message;
-    resultIntent.textContent = "-";
-    resultGloss.textContent = "-";
-    resultConfidence.textContent = "-";
-    resultLatency.textContent = "-";
+    warnings.textContent = `请求失败：${error.message}`;
+    warnings.style.display = "block";
+    resultStatus.textContent = "识别失败";
   }
-}
-
-function renderResult(result) {
-  resultStatus.textContent = result.status;
-  resultText.textContent = result.text_zh;
-  resultIntent.textContent = result.intent;
-  resultGloss.textContent = result.gloss;
-  resultConfidence.textContent = `${(result.confidence * 100).toFixed(1)}%`;
-  resultLatency.textContent = `${result.latency_ms.total ?? 0} ms`;
-  warnings.replaceChildren(
-    ...result.warnings.map((warning) => {
-      const item = document.createElement("li");
-      item.textContent = warning;
-      return item;
-    }),
-  );
-}
-
-function formatBytes(bytes) {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
+});
 
 loadHealth();

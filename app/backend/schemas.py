@@ -1,27 +1,27 @@
 from __future__ import annotations
 
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 
-class RankedPrediction(BaseModel):
+class TopKItem(BaseModel):
     intent: str
     confidence: float
 
 
+class LatencyMetrics(BaseModel):
+    extraction: Optional[float] = 0.0
+    inference: Optional[float] = 0.0
+    total: Optional[float] = 0.0
+
+
 class PredictionResponse(BaseModel):
-    status: str
+    status: str  # ok, low_confidence, low_quality, model_unavailable
     intent: str
     gloss: str
     text_zh: str
     confidence: float
-    top_k: list[RankedPrediction]
-    warnings: list[str]
-    latency_ms: dict[str, float]
-    model_version: str | None = None
-
-
-class HealthResponse(BaseModel):
-    status: str
-    model_ready: bool
-    demo_mode: bool
-    model_error: str | None = None
+    top_k: List[TopKItem] = []
+    warnings: List[str] = []
+    latency_ms: LatencyMetrics
+    model_version: Optional[str] = None

@@ -254,3 +254,43 @@ ONNX 模型随版本标签上传到私有 GitHub Release。
 6. 第6周：Web 端到端演示、F1、混淆矩阵、延迟和复现说明。
 
 详细检查表见 [docs/reports/week-06.md](docs/reports/week-06.md)。
+
+---
+
+## 👤 个人工作记录 (Su Hongsheng)
+
+### 数据准备
+- 下载并整理 CE-CSL 数据集（5,988 个视频）
+- 使用 MediaPipe Holistic 提取手、脸、上肢关键点特征
+- 生成 `.npy` 特征文件（48 帧 × 368 维）
+- 创建词汇表 `data/vocab.txt`（3,862 个 Gloss 词）
+
+### 模型训练
+- 实现 LSTM + CTC 模型进行帧级别 Gloss 预测
+- 训练 CTC 模型，最终 Loss 降至 **0.89**
+- 导出 CTC 模型为 ONNX 格式（`ctc_model.onnx`）
+
+### 端到端集成
+- 实现完整推理流程：视频 → MediaPipe → CTC → Gloss 序列 → 意图映射 → 中文输出
+- 集成到 Web 界面（FastAPI + 前端）
+- 编写意图映射配置（13 个意图 → 医院场景中文）
+
+### 训练与推理脚本
+- `scripts/train_ctc.py` - CTC 模型训练
+- `scripts/extract_alignment.py` - 提取帧级别对齐结果
+- `scripts/split_by_alignment.py` - 按对齐结果切分特征
+- `scripts/e2e_predict.py` - 端到端预测
+- `scripts/export_ctc_onnx.py` - ONNX 导出
+
+### 代码贡献
+- `src/cslr/models/ctc.py` - CTC 模型定义
+- `src/cslr/inference/ctc_service.py` - CTC ONNX 推理服务
+- `src/cslr/data/ctc_dataset.py` - CTC 数据加载器
+- `app/backend/routes.py` - 预测 API
+- `app/backend/services.py` - 服务层
+- `app/frontend/app.js` - 前端交互逻辑
+
+### 结果
+- CTC 模型成功识别 Gloss 序列（如 `2 0 2 3 高 时间 。`）
+- 意图映射准确输出医院场景中文（如 `对方在询问时间。`）
+- Web 界面可上传视频并实时返回识别结果

@@ -1,13 +1,13 @@
 """
 Evaluate CTC model on CE-CSL dev/test splits.
-Computes sentence-level sequence accuracy and sentence-level average Word Error Rate (WER).
+Computes:
+- Sentence-level Sequence Accuracy: % of samples where predicted gloss matches reference exactly.
+- Corpus-level WER: Total edit distance across all samples / Total reference words across all samples.
+  This is the standard WER metric used in ASR/SLR literature.
 
 Definitions:
-- Sentence-level Sequence Accuracy: Percentage of samples where the predicted gloss sequence
-  exactly matches the reference gloss sequence.
-- Sentence-level Average WER: Average of WER scores across all samples.
-  WER for a single sample = Levenshtein distance(reference_words, predicted_words) / len(reference_words)
-  The final reported value is the mean WER across all samples in the dataset.
+- Sentence-level Sequence Accuracy = (correct sequences) / (total sequences)
+- Corpus-level WER = sum(Levenshtein distance per sample) / sum(reference length per sample)
 
 Outputs:
 - artifacts/metrics/ce_csl_eval_summary.txt: Summary of results
@@ -154,39 +154,24 @@ def decode_ctc(preds, blank_idx, idx_to_word):
     return ' '.join(result)
 
 
-def sentence_level_wer(ref, hyp):
+def sentence_wer(ref_words, hyp_words):
     """
-    Compute Word Error Rate (WER) for a single sentence pair.
-
-    WER is defined as the Levenshtein distance between reference and hypothesis
-    word sequences, normalized by the length of the reference.
+    Compute WER for a single sentence pair using Levenshtein distance.
 
     Args:
-        ref: Reference gloss sequence string (space-separated)
-        hyp: Hypothesis gloss sequence string (space-separated)
+        ref_words: List of reference words
+        hyp_words: List of hypothesis words
 
     Returns:
-        WER score (0.0 = perfect, >0.0 = errors)
+        Levenshtein distance between ref and hyp
     """
-    ref_words = ref.split()
-    hyp_words = hyp.split()
-
-    # If reference is empty, treat any hypothesis as an error
-    if len(ref_words) == 0:
-        return 1.0 if len(hyp_words) > 0 else 0.0
-
     try:
         import Levenshtein
-        # Levenshtein.distance on lists computes edit distance between sequences
-        distance = Levenshtein.distance(ref_words, hyp_words)
-        return distance / len(ref_words)
+        return Levenshtein.distance(ref_words, hyp_words)
     except ImportError:
-        # Fallback: simple mismatch count (less accurate, used if Levenshtein not installed)
-        logger.warning("Levenshtein not installed, using fallback WER (mismatch count)")
-        mismatches = sum(1 for r, h in zip(ref_words, hyp_words) if r != h)
-        # Penalize extra/missing words in hypothesis
-        mismatches += abs(len(ref_words) - len(hyp_words))
-        return mismatches / len(ref_words)
+        # Fallback: simple count of mismatches (less accurate)
+        logger.warning("Levenshtein not installed, using fallback WER")
+        return sum(1 for r, h in zip(ref_words, hyp_words) if r != h) + abs(len(ref_words) - len(hyp_words))
 
 
 logger.info("  Helper functions initialized")
@@ -206,15 +191,16 @@ for split in ['dev', 'test']:
     start_time = time.time()
 
     # Accumulators for metrics
-    total_wer = 0.0          # Sum of WER across all samples
-    correct_seq = 0          # Count of exact matches
-    total = 0                # Total samples processed
+    total_edit_distance = 0    # Sum of Levenshtein distances across all samples
+    total_ref_words = 0        # Sum of reference word counts across all samples
+    correct_seq = 0            # Count of exact matches
+    total = 0                  # Total samples processed
 
     # Storage for detailed outputs
-    refs = []                # Reference sequences
-    hyps = []                # Hypothesis sequences
-    sample_ids = []          # Sample IDs
-    error_samples = []       # Samples where prediction != reference
+    refs = []                  # Reference sequences
+    hyps = []                  # Hypothesis sequences
+    sample_ids = []            # Sample IDs
+    error_samples = []         # Samples where prediction != reference
 
     for row in tqdm(samples[split], desc=f"  Processing {split}"):
         sample_id = row['sample_id']
@@ -250,6 +236,12 @@ for split in ['dev', 'test']:
         sample_ids.append(sample_id)
 
         total += 1
+        ref_words = true_gloss_clean.split()
+        hyp_words = pred_gloss.split()
+
+        # Accumulate for corpus-level WER
+        total_edit_distance += sentence_wer(ref_words, hyp_words)
+        total_ref_words += len(ref_words)
 
         # Check for exact match (sentence-level sequence accuracy)
         if pred_gloss == true_gloss_clean:
@@ -257,22 +249,21 @@ for split in ['dev', 'test']:
         else:
             error_samples.append((sample_id, true_gloss_clean, pred_gloss))
 
-        # Accumulate sentence-level WER
-        total_wer += sentence_level_wer(true_gloss_clean, pred_gloss)
-
     elapsed = time.time() - start_time
 
     # Compute final metrics
-    # sentence-level sequence accuracy
+    # Sentence-level sequence accuracy
     seq_acc = correct_seq / total if total > 0 else 0.0
-    # sentence-level average WER
-    avg_wer = total_wer / total if total > 0 else 0.0
+    # Corpus-level WER = total_edit_distance / total_ref_words
+    corpus_wer = total_edit_distance / total_ref_words if total_ref_words > 0 else 0.0
 
     results[split] = {
         'seq_acc': seq_acc,
-        'wer': avg_wer,
+        'corpus_wer': corpus_wer,
         'total': total,
         'correct': correct_seq,
+        'total_edit_distance': total_edit_distance,
+        'total_ref_words': total_ref_words,
         'refs': refs,
         'hyps': hyps,
         'sample_ids': sample_ids,
@@ -285,7 +276,8 @@ for split in ['dev', 'test']:
     logger.info(f"  Total samples processed: {total}")
     logger.info(f"  Correct sequences (exact match): {correct_seq}")
     logger.info(f"  Sentence-level Sequence Accuracy: {seq_acc:.2%}")
-    logger.info(f"  Sentence-level Average WER: {avg_wer:.2%}")
+    logger.info(f"  Corpus-level WER: {corpus_wer:.2%}")
+    logger.info(f"    (Total edit distance: {total_edit_distance}, Total reference words: {total_ref_words})")
     logger.info(f"  Evaluation time: {elapsed:.2f}s")
     logger.info(f"  Avg time per sample: {elapsed/total:.2f}s")
 
@@ -337,9 +329,9 @@ with open(summary_path, 'w') as f:
     f.write("-" * 60 + "\n")
     f.write("Sentence-level Sequence Accuracy: Percentage of samples where the\n")
     f.write("  predicted gloss sequence exactly matches the reference gloss sequence.\n\n")
-    f.write("Sentence-level Average WER: Average of WER scores across all samples.\n")
-    f.write("  WER = Levenshtein distance(reference_words, predicted_words) / len(reference_words)\n")
-    f.write("  The final reported value is the mean WER across all samples.\n\n")
+    f.write("Corpus-level WER: Standard WER metric used in ASR/SLR literature.\n")
+    f.write("  WER = Total edit distance across all samples / Total reference words across all samples\n")
+    f.write("  where edit distance is computed using Levenshtein distance on word sequences.\n\n")
 
     for split in ['dev', 'test']:
         if split not in results:
@@ -350,7 +342,8 @@ with open(summary_path, 'w') as f:
         f.write("-" * 60 + "\n")
         f.write(f"Sentence-level Sequence Accuracy: {r['seq_acc']:.2%}\n")
         f.write(f"  (Correct: {r['correct']}/{r['total']})\n")
-        f.write(f"Sentence-level Average WER: {r['wer']:.2%}\n")
+        f.write(f"Corpus-level WER: {r['corpus_wer']:.2%}\n")
+        f.write(f"  (Total edit distance: {r['total_edit_distance']}, Total reference words: {r['total_ref_words']})\n")
         f.write(f"Evaluation time: {r['elapsed']:.2f}s\n\n")
 
     f.write("=" * 60 + "\n")
@@ -367,4 +360,4 @@ print("\n=== Final Results ===")
 for split in ['dev', 'test']:
     if split in results:
         r = results[split]
-        print(f"{split.upper()}: Sequence Accuracy={r['seq_acc']:.2%}, Average WER={r['wer']:.2%}")
+        print(f"{split.upper()}: Sequence Accuracy={r['seq_acc']:.2%}, Corpus-level WER={r['corpus_wer']:.2%}")

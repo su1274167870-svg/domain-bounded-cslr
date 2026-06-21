@@ -1,6 +1,18 @@
 """
 Evaluate CTC model on CE-CSL dev/test splits.
-Computes sequence accuracy and WER using Levenshtein distance.
+Computes sentence-level sequence accuracy and sentence-level average Word Error Rate (WER).
+
+Definitions:
+- Sentence-level Sequence Accuracy: Percentage of samples where the predicted gloss sequence
+  exactly matches the reference gloss sequence.
+- Sentence-level Average WER: Average of WER scores across all samples.
+  WER for a single sample = Levenshtein distance(reference_words, predicted_words) / len(reference_words)
+  The final reported value is the mean WER across all samples in the dataset.
+
+Outputs:
+- artifacts/metrics/ce_csl_eval_summary.txt: Summary of results
+- artifacts/metrics/ce_csl_eval_detailed.csv: Predictions for every sample
+- artifacts/metrics/ce_csl_eval_errors.csv: Only samples with errors (for debugging)
 """
 
 import sys
@@ -25,7 +37,9 @@ logger.info("=" * 60)
 logger.info("CTC Model Evaluation on CE-CSL")
 logger.info("=" * 60)
 
-# 1. Load vocabulary
+# ============================================================================
+# Step 1: Load vocabulary
+# ============================================================================
 logger.info("Step 1/6: Loading vocabulary...")
 vocab = {}
 idx_to_word = {}
@@ -37,14 +51,16 @@ if not vocab_path.exists():
 with open(vocab_path, 'r') as f:
     for idx, line in enumerate(f):
         word = line.strip()
-        vocab[word] = idx + 1
+        vocab[word] = idx + 1          # idx 0 reserved for padding
         idx_to_word[idx + 1] = word
 vocab_size = len(vocab)
-blank_idx = vocab_size
+blank_idx = vocab_size                 # blank token index = vocab_size
 logger.info(f"  Vocabulary size: {vocab_size}")
 logger.info(f"  Blank index: {blank_idx}")
 
-# 2. Load CTC model
+# ============================================================================
+# Step 2: Load CTC model
+# ============================================================================
 logger.info("Step 2/6: Loading CTC model...")
 spec = importlib.util.spec_from_file_location(
     "ctc_model",
@@ -58,6 +74,7 @@ ctc_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ctc_module)
 CTCModel = ctc_module.CTCModel
 
+# Model architecture parameters (must match training)
 model = CTCModel(
     input_size=368,
     hidden_size=512,
@@ -71,6 +88,7 @@ if not checkpoint_path.exists():
     logger.error(f"Checkpoint not found: {checkpoint_path}")
     sys.exit(1)
 
+# Load weights with CPU first, then move to device if available
 model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
 model.eval()
 logger.info(f"  Model loaded from: {checkpoint_path}")
@@ -79,7 +97,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 logger.info(f"  Device: {device}")
 
-# 3. Load manifest
+# ============================================================================
+# Step 3: Load manifest with split information
+# ============================================================================
 logger.info("Step 3/6: Loading manifest...")
 manifest_path = Path('data/manifests/ce_csl_full.csv')
 if not manifest_path.exists():
@@ -107,33 +127,73 @@ if not samples['dev'] and not samples['test']:
     logger.error("No dev or test samples found in manifest")
     sys.exit(1)
 
-# 4. Define helper functions
+# ============================================================================
+# Step 4: Helper functions
+# ============================================================================
 logger.info("Step 4/6: Initializing helper functions...")
 
 def decode_ctc(preds, blank_idx, idx_to_word):
-    """Convert frame-level predictions to Gloss sequence."""
+    """
+    Convert frame-level predictions (indices) to a single Gloss sequence string.
+
+    Args:
+        preds: 1D array of predicted indices for each frame
+        blank_idx: Index of the blank token (to be removed)
+        idx_to_word: Mapping from index to Gloss word string
+
+    Returns:
+        Space-separated Gloss sequence (e.g., "我 想 去 医院")
+    """
     result = []
     last = blank_idx
     for p in preds:
+        # Skip blank tokens and consecutive duplicates
         if p != blank_idx and p != last:
             result.append(idx_to_word.get(p, 'UNKNOWN'))
         last = p
     return ' '.join(result)
 
-def wer(ref, hyp):
-    """Word Error Rate using Levenshtein distance."""
+
+def sentence_level_wer(ref, hyp):
+    """
+    Compute Word Error Rate (WER) for a single sentence pair.
+
+    WER is defined as the Levenshtein distance between reference and hypothesis
+    word sequences, normalized by the length of the reference.
+
+    Args:
+        ref: Reference gloss sequence string (space-separated)
+        hyp: Hypothesis gloss sequence string (space-separated)
+
+    Returns:
+        WER score (0.0 = perfect, >0.0 = errors)
+    """
     ref_words = ref.split()
     hyp_words = hyp.split()
+
+    # If reference is empty, treat any hypothesis as an error
+    if len(ref_words) == 0:
+        return 1.0 if len(hyp_words) > 0 else 0.0
+
     try:
         import Levenshtein
-        return Levenshtein.distance(ref_words, hyp_words) / max(len(ref_words), 1)
+        # Levenshtein.distance on lists computes edit distance between sequences
+        distance = Levenshtein.distance(ref_words, hyp_words)
+        return distance / len(ref_words)
     except ImportError:
-        logger.warning("Levenshtein not installed, using fallback WER")
-        return sum(1 for r, h in zip(ref_words, hyp_words) if r != h) / max(len(ref_words), 1)
+        # Fallback: simple mismatch count (less accurate, used if Levenshtein not installed)
+        logger.warning("Levenshtein not installed, using fallback WER (mismatch count)")
+        mismatches = sum(1 for r, h in zip(ref_words, hyp_words) if r != h)
+        # Penalize extra/missing words in hypothesis
+        mismatches += abs(len(ref_words) - len(hyp_words))
+        return mismatches / len(ref_words)
 
-logger.info("  Helpers initialized")
 
-# 5. Run evaluation
+logger.info("  Helper functions initialized")
+
+# ============================================================================
+# Step 5: Run evaluation on dev and test sets
+# ============================================================================
 logger.info("Step 5/6: Running evaluation...")
 results = {}
 
@@ -145,18 +205,22 @@ for split in ['dev', 'test']:
     logger.info(f"\n--- Evaluating {split.upper()} ({len(samples[split])} samples) ---")
     start_time = time.time()
 
-    total_wer = 0
-    correct_seq = 0
-    total = 0
-    refs = []
-    hyps = []
-    sample_ids = []
-    error_samples = []
+    # Accumulators for metrics
+    total_wer = 0.0          # Sum of WER across all samples
+    correct_seq = 0          # Count of exact matches
+    total = 0                # Total samples processed
+
+    # Storage for detailed outputs
+    refs = []                # Reference sequences
+    hyps = []                # Hypothesis sequences
+    sample_ids = []          # Sample IDs
+    error_samples = []       # Samples where prediction != reference
 
     for row in tqdm(samples[split], desc=f"  Processing {split}"):
         sample_id = row['sample_id']
         true_gloss = row['label']
 
+        # Load pre-extracted MediaPipe features
         feat_path = Path(f'data/processed/ce_csl/{sample_id}.npy')
         if not feat_path.exists():
             logger.debug(f"  Feature not found: {feat_path}")
@@ -167,55 +231,72 @@ for split in ['dev', 'test']:
             logger.debug(f"  Empty feature: {feat_path}")
             continue
 
+        # Run model inference
         feat_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(device)
-
         with torch.no_grad():
             logits = model(feat_tensor)
+            # Get most likely class for each frame
             preds = torch.argmax(logits.squeeze(0), dim=-1).cpu().numpy()
 
+        # Decode frame-level predictions to Gloss sequence
         pred_gloss = decode_ctc(preds, blank_idx, idx_to_word)
+
+        # Clean reference: convert '/' separated to space separated
         true_gloss_clean = ' '.join(true_gloss.split('/'))
 
+        # Store results
         refs.append(true_gloss_clean)
         hyps.append(pred_gloss)
         sample_ids.append(sample_id)
 
         total += 1
+
+        # Check for exact match (sentence-level sequence accuracy)
         if pred_gloss == true_gloss_clean:
             correct_seq += 1
         else:
             error_samples.append((sample_id, true_gloss_clean, pred_gloss))
 
-        total_wer += wer(true_gloss_clean, pred_gloss)
+        # Accumulate sentence-level WER
+        total_wer += sentence_level_wer(true_gloss_clean, pred_gloss)
 
     elapsed = time.time() - start_time
-    seq_acc = correct_seq / total if total > 0 else 0
-    avg_wer = total_wer / total if total > 0 else 0
+
+    # Compute final metrics
+    # sentence-level sequence accuracy
+    seq_acc = correct_seq / total if total > 0 else 0.0
+    # sentence-level average WER
+    avg_wer = total_wer / total if total > 0 else 0.0
 
     results[split] = {
         'seq_acc': seq_acc,
         'wer': avg_wer,
         'total': total,
+        'correct': correct_seq,
         'refs': refs,
         'hyps': hyps,
         'sample_ids': sample_ids,
-        'error_samples': error_samples
+        'error_samples': error_samples,
+        'elapsed': elapsed
     }
 
+    # Log results
     logger.info(f"\n  === {split.upper()} Results ===")
     logger.info(f"  Total samples processed: {total}")
-    logger.info(f"  Correct sequences: {correct_seq}")
-    logger.info(f"  Sequence accuracy: {seq_acc:.2%}")
-    logger.info(f"  Word Error Rate (WER): {avg_wer:.2%}")
+    logger.info(f"  Correct sequences (exact match): {correct_seq}")
+    logger.info(f"  Sentence-level Sequence Accuracy: {seq_acc:.2%}")
+    logger.info(f"  Sentence-level Average WER: {avg_wer:.2%}")
     logger.info(f"  Evaluation time: {elapsed:.2f}s")
     logger.info(f"  Avg time per sample: {elapsed/total:.2f}s")
 
-# 6. Save results
-logger.info("Step 6/6: Saving results...")
+# ============================================================================
+# Step 6: Save results to files
+# ============================================================================
+logger.info("\nStep 6/6: Saving results...")
 output_dir = Path('artifacts/metrics')
 output_dir.mkdir(parents=True, exist_ok=True)
 
-# Save detailed predictions
+# 6a: Detailed predictions for every sample
 detail_path = output_dir / 'ce_csl_eval_detailed.csv'
 with open(detail_path, 'w', newline='') as f:
     writer = csv.writer(f)
@@ -225,10 +306,9 @@ with open(detail_path, 'w', newline='') as f:
             continue
         for i, sample_id in enumerate(results[split]['sample_ids']):
             writer.writerow([split, sample_id, results[split]['refs'][i], results[split]['hyps'][i]])
+logger.info(f"  Detailed predictions: {detail_path}")
 
-logger.info(f"  Detailed results saved to: {detail_path}")
-
-# Save error samples
+# 6b: Error samples only (for debugging)
 error_path = output_dir / 'ce_csl_eval_errors.csv'
 with open(error_path, 'w', newline='') as f:
     writer = csv.writer(f)
@@ -238,28 +318,47 @@ with open(error_path, 'w', newline='') as f:
             continue
         for sample_id, ref, hyp in results[split]['error_samples']:
             writer.writerow([split, sample_id, ref, hyp])
+logger.info(f"  Error samples: {error_path}")
 
-logger.info(f"  Error samples saved to: {error_path}")
-
-# Save summary
+# 6c: Summary file (human-readable)
 summary_path = output_dir / 'ce_csl_eval_summary.txt'
 with open(summary_path, 'w') as f:
-    f.write("=== CTC Model Evaluation Summary ===\n")
+    f.write("=" * 60 + "\n")
+    f.write("CTC Model Evaluation Summary\n")
+    f.write("=" * 60 + "\n")
     f.write(f"Model: CTC (LSTM+CTC)\n")
     f.write(f"Checkpoint: {checkpoint_path}\n")
-    f.write(f"Vocabulary size: {vocab_size}\n\n")
+    f.write(f"Vocabulary size: {vocab_size}\n")
+    f.write(f"Blank index: {blank_idx}\n")
+    f.write(f"Device: {device}\n\n")
+
+    f.write("-" * 60 + "\n")
+    f.write("Metrics Definition\n")
+    f.write("-" * 60 + "\n")
+    f.write("Sentence-level Sequence Accuracy: Percentage of samples where the\n")
+    f.write("  predicted gloss sequence exactly matches the reference gloss sequence.\n\n")
+    f.write("Sentence-level Average WER: Average of WER scores across all samples.\n")
+    f.write("  WER = Levenshtein distance(reference_words, predicted_words) / len(reference_words)\n")
+    f.write("  The final reported value is the mean WER across all samples.\n\n")
 
     for split in ['dev', 'test']:
         if split not in results:
             continue
         r = results[split]
-        f.write(f"=== {split.upper()} ({r['total']} samples) ===\n")
-        f.write(f"Sequence Accuracy: {r['seq_acc']:.2%}\n")
-        f.write(f"WER: {r['wer']:.2%}\n")
-        f.write(f"Correct sequences: {r['seq_acc'] * r['total']:.0f}/{r['total']}\n\n")
+        f.write("-" * 60 + "\n")
+        f.write(f"{split.upper()} SET ({r['total']} samples)\n")
+        f.write("-" * 60 + "\n")
+        f.write(f"Sentence-level Sequence Accuracy: {r['seq_acc']:.2%}\n")
+        f.write(f"  (Correct: {r['correct']}/{r['total']})\n")
+        f.write(f"Sentence-level Average WER: {r['wer']:.2%}\n")
+        f.write(f"Evaluation time: {r['elapsed']:.2f}s\n\n")
 
-logger.info(f"  Summary saved to: {summary_path}")
+    f.write("=" * 60 + "\n")
+    f.write("END OF SUMMARY\n")
 
+logger.info(f"  Summary: {summary_path}")
+
+# Print final results to console
 logger.info("\n" + "=" * 60)
 logger.info("Evaluation complete!")
 logger.info("=" * 60)
@@ -267,4 +366,5 @@ logger.info("=" * 60)
 print("\n=== Final Results ===")
 for split in ['dev', 'test']:
     if split in results:
-        print(f"{split.upper()}: Sequence Accuracy={results[split]['seq_acc']:.2%}, WER={results[split]['wer']:.2%}")
+        r = results[split]
+        print(f"{split.upper()}: Sequence Accuracy={r['seq_acc']:.2%}, Average WER={r['wer']:.2%}")

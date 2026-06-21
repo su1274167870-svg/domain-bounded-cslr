@@ -1,15 +1,37 @@
-=== CTC Model Evaluation Summary ===
+============================================================
+CTC Model Evaluation Summary
+============================================================
 Model: CTC (LSTM+CTC)
 Checkpoint: artifacts/checkpoints/ctc_model_final.pt
 Vocabulary size: 3862
+Blank index: 3862
+Device: cuda
 
-=== DEV (515 samples) ===
-Sequence Accuracy: 26.60%
-WER: 28.64%
-Correct sequences: 137/515
+------------------------------------------------------------
+Metrics Definition
+------------------------------------------------------------
+Sentence-level Sequence Accuracy: Percentage of samples where the
+  predicted gloss sequence exactly matches the reference gloss sequence.
 
-=== TEST (500 samples) ===
-Sequence Accuracy: 19.80%
-WER: 33.88%
-Correct sequences: 99/500
+Sentence-level Average WER: Average of WER scores across all samples.
+  WER = Levenshtein distance(reference_words, predicted_words) / len(reference_words)
+  The final reported value is the mean WER across all samples.
 
+------------------------------------------------------------
+DEV SET (515 samples)
+------------------------------------------------------------
+Sentence-level Sequence Accuracy: 26.60%
+  (Correct: 137/515)
+Sentence-level Average WER: 28.64%
+Evaluation time: 3.86s
+
+------------------------------------------------------------
+TEST SET (500 samples)
+------------------------------------------------------------
+Sentence-level Sequence Accuracy: 19.80%
+  (Correct: 99/500)
+Sentence-level Average WER: 33.88%
+Evaluation time: 4.10s
+
+============================================================
+END OF SUMMARY

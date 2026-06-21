@@ -1,0 +1,15 @@
+=== CTC Model Evaluation Summary ===
+Model: CTC (LSTM+CTC)
+Checkpoint: artifacts/checkpoints/ctc_model_final.pt
+Vocabulary size: 3862
+
+=== DEV (515 samples) ===
+Sequence Accuracy: 26.60%
+WER: 28.64%
+Correct sequences: 137/515
+
+=== TEST (500 samples) ===
+Sequence Accuracy: 19.80%
+WER: 33.88%
+Correct sequences: 99/500
+

@@ -1,7 +1,6 @@
 services:
   app:
-    build:
-      context: .
+    build: .
     ports:
       - "${CSLR_PORT:-8088}:8000"
     environment:
@@ -9,32 +8,11 @@ services:
       CSLR_DEMO_MODE: ${CSLR_DEMO_MODE:-false}
       CSLR_CONFIDENCE_THRESHOLD: ${CSLR_CONFIDENCE_THRESHOLD:-0.65}
     volumes:
-      - ./artifacts/exports:/workspace/artifacts/exports:ro
-    restart: unless-stopped
-
-  dev:
-    build:
-      context: .
-    profiles: ["dev"]
-    working_dir: /workspace
-    entrypoint: ["python", "-m", "cslr.cli"]
-    environment:
-      PYTHONPATH: /workspace/src
-    volumes:
-      - ./:/workspace
-      - type: bind
-        source: ${CSLR_DATA_ROOT:-./data}
-        target: /workspace/data
       - ./artifacts:/workspace/artifacts
-
-  test:
-    build:
-      context: .
-      target: test
-    profiles: ["test"]
-    working_dir: /workspace
-    entrypoint: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+      - ./data:/workspace/data:ro
     environment:
-      PYTHONPATH: /workspace/src
-    volumes:
-      - ./:/workspace
+      - CSLR_DEMO_MODE=false
+      - CSLR_CONFIDENCE_THRESHOLD=0.65
+      - CTC_MODEL_PATH=/workspace/artifacts/exports/ctc_model.onnx
+      - CTC_VOCAB_PATH=/workspace/data/vocab.txt
+    restart: unless-stopped

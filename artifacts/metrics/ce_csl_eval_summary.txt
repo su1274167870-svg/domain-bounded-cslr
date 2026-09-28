@@ -1,0 +1,39 @@
+============================================================
+CTC Model Evaluation Summary
+============================================================
+Model: CTC (LSTM+CTC)
+Checkpoint: artifacts/checkpoints/ctc_model_final.pt
+Vocabulary size: 3862
+Blank index: 3862
+Device: cuda
+
+------------------------------------------------------------
+Metrics Definition
+------------------------------------------------------------
+Sentence-level Sequence Accuracy: Percentage of samples where the
+  predicted gloss sequence exactly matches the reference gloss sequence.
+
+Corpus-level WER: Standard WER metric used in ASR/SLR literature.
+  WER = Total edit distance across all samples / Total reference words across all samples
+  where edit distance is computed using Levenshtein distance on word sequences.
+
+------------------------------------------------------------
+DEV SET (515 samples)
+------------------------------------------------------------
+Sentence-level Sequence Accuracy: 26.60%
+  (Correct: 137/515)
+Corpus-level WER: 30.12%
+  (Total edit distance: 856, Total reference words: 2842)
+Evaluation time: 3.61s
+
+------------------------------------------------------------
+TEST SET (500 samples)
+------------------------------------------------------------
+Sentence-level Sequence Accuracy: 19.80%
+  (Correct: 99/500)
+Corpus-level WER: 35.66%
+  (Total edit distance: 1084, Total reference words: 3040)
+Evaluation time: 3.66s
+
+============================================================
+END OF SUMMARY

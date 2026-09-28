@@ -1,16 +1,16 @@
-version: 1
+version: 2
 fallback:
   intent: unknown
   gloss: UNKNOWN
-  text_zh: "未能可靠识别，请重新录制。"
+  text_zh: "无法识别，请让对方重试。"
 intents:
   registration:
     gloss: REGISTER
     text_zh: "我想登记。"
     safety_level: normal
-  appointment:
-    gloss: APPOINTMENT
-    text_zh: "我想预约。"
+  TIME_QUERY:
+    gloss: TIME_QUERY
+    text_zh: "对方在询问时间。"
     safety_level: normal
   payment:
     gloss: PAY
@@ -20,11 +20,11 @@ intents:
     gloss: INFO
     text_zh: "我想咨询信息。"
     safety_level: normal
-  directions:
-    gloss: WHERE
-    text_zh: "请问应该去哪里？"
+  QUESTION:
+    gloss: QUESTION
+    text_zh: "对方在询问。"
     safety_level: normal
-  help:
-    gloss: HELP
-    text_zh: "我需要帮助。"
+  HELP_REQUEST:
+    gloss: HELP_REQUEST
+    text_zh: "对方需要帮助。"
     safety_level: elevated

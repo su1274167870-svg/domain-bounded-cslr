@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from cslr.inference.service import RecognitionService
+# Import both the original (for labels) and CTC service
 from cslr.semantic import IntentCatalog
+from cslr.inference.ctc_service import create_ctc_service
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
